@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>D in the browser — proof of concept</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --dim: #888; --err: #d0334a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+           padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  #status { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #status[data-busy]::before { content: "◐ "; }
+  main { flex: 1; display: flex; min-height: 0; }
+  section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  section + section { border-left: 1px solid var(--line); }
+  h2 { margin: 0; padding: 6px 12px; font-size: 11px; font-weight: 600;
+       letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  textarea, pre { margin: 0; padding: 12px 12px 24px; border: 0; background: transparent;
+                  font: 13px/1.45 ui-monospace, Consolas, monospace; tab-size: 4;
+                  white-space: pre; overflow: auto; color: inherit; }
+  textarea { flex: 1; resize: none; outline: none; }
+  #out { flex: 1; }
+  #diag { flex: 0 1 auto; max-height: 45%; color: var(--err); border-top: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+  select, button { font: 12px system-ui; padding: 4px 10px; }
+  button { font-weight: 600; }
+  kbd { font: 11px ui-monospace, monospace; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>D → WebAssembly, compiled in the browser</h1>
+  <select id="examples" title="Load an example"></select>
+  <button id="run" disabled>Run <kbd>Ctrl+Enter</kbd></button>
+  <span id="status">starting…</span>
+</header>
+
+<main>
+  <section>
+    <h2>D source</h2>
+    <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+  </section>
+  <section>
+    <h2>Output</h2>
+    <pre id="out">Press Run to compile and execute this program.</pre>
+    <pre id="diag" hidden></pre>
+  </section>
+</main>
+
+<script type="module">
+const EXAMPLES = [
+  ["Hello, values", `import std.stdio;
+
+void main()
+{
+    writeln("hello from D, running in the browser");
+    foreach (i; 0 .. 5)
+        write(i * i, ' ');
+    writeln();
+}
+`],
+  ["Ranges & algorithms", `import std.stdio, std.algorithm, std.range;
+
+void main()
+{
+    auto xs = [5, 3, 9, 1, 7, 8];
+    writeln("unsorted: ", xs);
+    writeln("sorted:   ", xs.sort);
+    writeln("evens:    ", xs.filter!(x => x % 2 == 0));
+    writeln("sum:      ", xs.sum, "  max: ", xs.maxElement);
+}
+`],
+  ["Structs & templates", `import std.stdio, std.conv : to;
+
+struct Vec2(T)
+{
+    T x, y;
+    Vec2 opBinary(string op)(Vec2 rhs) if (op == "+")
+        => Vec2(x + rhs.x, y + rhs.y);
+    string toString() const => "(" ~ x.to!string ~ ", " ~ y.to!string ~ ")";
+}
+
+void main()
+{
+    auto a = Vec2!double(1.5, 2.5);
+    auto b = Vec2!double(10.0, 20.0);
+    writeln("a = ", a, ", b = ", b, ", a + b = ", a + b);
+}
+`],
+  ["Diagnostics: type mismatch", `import std.stdio;
+
+void main()
+{
+    // Deliberate compile error, to show diagnostics coming back from the compiler.
+    int x = "not an int";
+    writeln(x);
+}
+`],
+];
+
+const $ = (id) => document.getElementById(id);
+const srcEl = $("src"), outEl = $("out"), diagEl = $("diag"), statusEl = $("status"), runBtn = $("run");
+const examplesEl = $("examples");
+
+// Resolved against the page, not the worker: glue.js fetches this URL from
+// inside vendor/worker.js, where a bare "./vendor/dmd.wasm" would resolve to
+// /vendor/vendor/dmd.wasm. dmd.wasm is served as application/wasm with CORS: *,
+// so it can be vendored next to this page or pulled from the hosted build.
+const wasmUrl = new URL(
+    new URLSearchParams(location.search).get("wasm") || "./vendor/dmd.wasm",
+    location.href,
+).href;
+// A user program can loop forever; the worker is the only thread we can kill, so
+// it is replaced wholesale if a run doesn't report back in time.
+const RUN_TIMEOUT_MS = 60000;
+
+let worker = null, ready = false, busy = false, watchdog = 0, startedAt = 0;
+
+function setStatus(text, busyState = false) {
+    statusEl.textContent = text;
+    if (busyState) statusEl.setAttribute("data-busy", ""); else statusEl.removeAttribute("data-busy");
+}
+
+function makeWorker() {
+    const w = new Worker("./vendor/worker.js", { type: "module" });
+    w.onmessage = ({ data }) => onMessage(data);
+    w.onerror = (e) => {
+        busy = false; runBtn.disabled = !ready;
+        setStatus("worker error: " + (e.message || "unknown"));
+    };
+    return w;
+}
+
+function load() {
+    setStatus("loading dmd.wasm (25 MB)…", true);
+    worker.postMessage({ type: "load", url: wasmUrl });
+}
+
+function onMessage(msg) {
+    switch (msg.type) {
+        case "loaded":
+            // Compiling druntime is most of a program build, so prepay it now,
+            // while the user is still reading the example. Run stays disabled
+            // until that lands: the worker handles messages in order, so a Run
+            // issued during the precompile just blocks behind it — and is
+            // charged for it in the reported time.
+            setStatus("precompiling runtime…", true);
+            worker.postMessage({ type: "warm" });
+            break;
+
+        case "loadError":
+            ready = false;
+            setStatus("failed to load: " + msg.message);
+            showDiagnostics("Could not load " + wasmUrl + "\n" + msg.message);
+            break;
+
+        case "warmed":
+            ready = true;
+            runBtn.disabled = false;
+            setStatus("ready");
+            break;
+
+        case "runPhase":
+            setStatus(msg.phase + "…", true);
+            break;
+
+        case "runResult":
+            clearTimeout(watchdog);
+            busy = false;
+            runBtn.disabled = false;
+            renderRun(msg.result, performance.now() - startedAt);
+            break;
+    }
+}
+
+// dmd colourises its diagnostics with SGR escapes (\x1b[1;31m). The explorer
+// renders those as coloured spans; a plain <pre> needs them stripped instead.
+const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+
+function showDiagnostics(text) {
+    const clean = (text || "").replace(ANSI_SGR, "").trim();
+    diagEl.textContent = clean;
+    diagEl.hidden = !clean;
+}
+
+function renderRun({ output, errors, exitCode, diagnostics }, ms) {
+    const lines = [];
+    if (output) lines.push(output.replace(/\n$/, ""));
+    if (errors) lines.push("(compilation failed)");
+    else if (exitCode) lines.push("(exited with status " + exitCode + ")");
+    outEl.textContent = lines.join("\n") || "(no output)";
+    showDiagnostics((diagnostics || "").trim());
+    setStatus((errors ? "error" : "ok") + " · " + ms.toFixed(0) + " ms");
+}
+
+function run() {
+    if (!ready || busy) return;
+    busy = true;
+    runBtn.disabled = true;
+    outEl.textContent = "";
+    showDiagnostics("");
+    startedAt = performance.now();
+    setStatus("compiling…", true);
+    worker.postMessage({ type: "run", src: srcEl.value });
+
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+        worker.terminate();
+        worker = makeWorker();
+        busy = false; ready = false; runBtn.disabled = true;
+        outEl.textContent = "(program did not finish within " + RUN_TIMEOUT_MS / 1000 + " s — stopped)";
+        setStatus("timed out");
+        load();
+    }, RUN_TIMEOUT_MS);
+}
+
+for (const [label, code] of EXAMPLES) {
+    const option = document.createElement("option");
+    option.textContent = label;
+    examplesEl.appendChild(option);
+}
+examplesEl.addEventListener("change", () => {
+    srcEl.value = EXAMPLES[examplesEl.selectedIndex][1];
+    srcEl.focus();
+});
+examplesEl.selectedIndex = 0;
+srcEl.value = EXAMPLES[0][1];
+
+runBtn.addEventListener("click", run);
+addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+});
+// Keep Tab in the editor (insert a real tab) instead of moving focus away.
+srcEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    e.preventDefault();
+    const { selectionStart: s, selectionEnd: t } = srcEl;
+    srcEl.setRangeText("\t", s, t, "end");
+});
+
+worker = makeWorker();
+load();
+</script>
+</body>
+</html>
