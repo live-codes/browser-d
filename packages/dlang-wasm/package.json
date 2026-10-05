@@ -23,7 +23,7 @@
     "./iife": "./dist/dlang-wasm.global.js"
   },
   "bin": {
-    "dlang-wasm-copy-assets": "./bin/copy-assets.mjs"
+    "dlang-wasm-copy-assets": "bin/copy-assets.mjs"
   },
   "files": [
     "src",
