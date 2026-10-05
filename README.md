@@ -155,12 +155,24 @@ Things to resolve before this becomes a language, roughly in order of weight:
 ```
 index.html          the PoC page — editor, Run, output, diagnostics
 serve.mjs           static server (adds Content-Type: application/wasm)
-vendor/
-  dmd.wasm          the DMD wasm build (25 MB)
+vendor/             upstream runtime, vendored, with one documented patch (stdin)
   glue.js           load / compile / run against dmd.wasm
   worker.js         worker wrapper around glue.js
-  README.md         provenance, license and how to update
+  README.md         provenance, the local patch, license and how to update
+packages/
+  dlang-wasm/       the distributable package (@live-codes/dlang-wasm)
+    assets/dmd.wasm the DMD wasm build (25 MB)
+    src/            runtime, API, asset loading
+    example/        browser check: module worker + classic worker
+    bin/            dlang-wasm-copy-assets
+    test/           real compiles, node --test
 ```
 
-`vendor/` is upstream code, vendored unmodified. See [vendor/README.md](vendor/README.md)
-for provenance and licensing.
+`vendor/` is upstream code carrying the stdin patch described in
+[vendor/README.md](vendor/README.md). The compiler asset lives with the package that ships it —
+the page's default wasm URL points at `packages/dlang-wasm/assets/dmd.wasm`.
+
+[`packages/dlang-wasm`](packages/dlang-wasm) is the same runtime productised for use in LiveCodes,
+in the shape of [`@live-codes/clang-wasm`](https://github.com/live-codes/clang-wasm): an API, an IIFE
+build for classic workers, asset receipts, a copy-assets CLI and a test suite. See its
+[README](packages/dlang-wasm/README.md).

@@ -27,6 +27,9 @@ this; `glue.js` and `worker.js` were subsequently patched (see
 | `glue.js` | 15,981 | `55900DA4E476730FE40CDAF91E29C29C87B8D68940F256BE0215130208891B49` |
 | `worker.js` | 2,732 | `3E918E00CE273DE3F1543AC23FA2EBB67BB034B58D389696AD2559E351606CE4` |
 
+`dmd.wasm` now lives at `packages/dlang-wasm/assets/dmd.wasm`, with the package that ships it; this
+directory keeps only the two JS files the demo page drives.
+
 ## Update
 
 ```sh

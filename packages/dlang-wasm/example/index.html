@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>@live-codes/dlang-wasm — browser check</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; padding: 24px; font: 14px/1.6 system-ui, sans-serif; max-width: 62rem; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { color: #888; margin: 0 0 16px; font-size: 13px; }
+  pre { margin: 0; padding: 16px; border: 1px solid #8884; border-radius: 8px;
+        font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  .pass { color: #2a8; }
+  .fail { color: #d0334a; font-weight: 700; }
+  .info { color: #888; }
+</style>
+</head>
+<body>
+<h1>@live-codes/dlang-wasm</h1>
+<p>Both ways a host can load the package, each inside a worker — which is not optional: Chromium
+refuses to instantiate a wasm module over 8 MB synchronously on the main thread, and dmd.wasm is far
+past that. The first compile takes seconds; the page waits.</p>
+<pre id="out"></pre>
+
+<script type="module">
+const out = document.getElementById('out');
+const escapeHtml = (text) =>
+	text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+
+const lines = [];
+let failures = 0;
+
+function log(text, className = '') {
+	lines.push({ text, className });
+	out.innerHTML = lines
+		.map(({ text: line, className: cls }) =>
+			cls ? `<span class="${cls}">${escapeHtml(line)}</span>` : escapeHtml(line)
+		)
+		.join('\n');
+}
+
+function check(name, actual, expected) {
+	const ok = actual === expected;
+	if (!ok) failures++;
+	log(
+		`${ok ? 'PASS' : 'FAIL'}  ${name}: ${JSON.stringify(actual)}` +
+			(ok ? '' : `\n      expected ${JSON.stringify(expected)}`),
+		ok ? 'pass' : 'fail'
+	);
+}
+
+const SOURCE = `import std.stdio, std.conv;
+
+void main()
+{
+    long sum;
+    foreach (line; stdin.byLine())
+        sum += line.to!long;
+    writeln("sum = ", sum);
+}
+`;
+const STDIN = '1\n2\n39\n';
+const EXPECTED = 'sum = 42\n';
+const ASSETS = new URL('../assets/', import.meta.url).href;
+
+/** Run the program in a worker and return the reply. */
+function inWorker(url, options = {}) {
+	const worker = new Worker(url, options);
+	return new Promise((resolve, reject) => {
+		worker.onmessage = (event) => {
+			worker.terminate();
+			resolve(event.data);
+		};
+		worker.onerror = (event) => {
+			worker.terminate();
+			reject(new Error(event.message || 'worker error'));
+		};
+		worker.postMessage({ baseUrl: ASSETS, source: SOURCE, stdin: STDIN });
+	});
+}
+
+async function runInWorker(label, url, options) {
+	try {
+		const reply = await inWorker(url, options);
+		if (!reply.ok) throw new Error(reply.error);
+		check(`${label} (stdout)`, reply.result.stdout, EXPECTED);
+		check(`${label} (errors)`, reply.result.errors.length, 0);
+		check(`${label} (exitCode)`, reply.result.exitCode, 0);
+	} catch (error) {
+		failures++;
+		log(`FAIL  ${label} threw: ${error.message}`, 'fail');
+	}
+}
+
+log('Loading 25 MB of dmd.wasm per worker…', 'info');
+
+// 1. A module worker importing the ES module entry.
+await runInWorker('ES module entry in a module worker', './worker.module.js', { type: 'module' });
+
+// 2. A classic worker importScripts()-ing the IIFE build.
+await runInWorker('IIFE in a classic worker', './worker.js');
+
+// 3. What happens on the main thread. Informational: the platform is expected to refuse, and the
+//    runtime is expected to explain why. Not counted either way.
+try {
+	const { createCompiler, LANGUAGE_IDS } = await import('../src/index.js');
+	check('LANGUAGE_IDS', LANGUAGE_IDS.join(','), 'd');
+	const compiler = await createCompiler('d', { baseUrl: new URL('../assets/', import.meta.url) });
+	const result = await compiler.run(SOURCE, STDIN);
+	log(
+		`INFO  main thread: allowed here (stdout ${JSON.stringify(result.stdout)}) - Chromium normally refuses`,
+		'info'
+	);
+} catch (error) {
+	log(`INFO  main thread: refused, as expected — ${error.message.split('\n')[0]}`, 'info');
+}
+
+log('');
+log(
+	failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`,
+	failures === 0 ? 'pass' : 'fail'
+);
+</script>
+</body>
+</html>

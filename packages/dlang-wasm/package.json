@@ -1,0 +1,45 @@
+{
+  "name": "@live-codes/dlang-wasm",
+  "version": "0.1.0",
+  "description": "Run D with one API, on the DMD compiler compiled to WebAssembly",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "node": "./src/index.node.js",
+      "browser": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./iife": "./dist/dlang-wasm.global.js"
+  },
+  "bin": {
+    "dlang-wasm-copy-assets": "./bin/copy-assets.mjs"
+  },
+  "files": [
+    "src",
+    "bin",
+    "scripts",
+    "dist",
+    "assets",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:iife": "node scripts/build-iife.mjs",
+    "test": "node --experimental-wasm-exnref --test \"test/*.test.js\""
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "keywords": [
+    "d",
+    "dlang",
+    "dmd",
+    "wasm",
+    "webassembly",
+    "compiler",
+    "playground"
+  ]
+}
