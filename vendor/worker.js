@@ -8,11 +8,11 @@
 //   { type: "warm" }          -> precompiles the runtime a Run needs, replies "warmed"
 //   { type: "compile", src, wat } -> compiles `src`, replies "result"
 //                              (`wat` also compiles it for the wasm target)
-//   { type: "run", src }       -> compiles (if needed) and runs `src`, posting a
+//   { type: "run", src, stdin } -> compiles (if needed) and runs `src`, posting a
 //                              "runPhase" per stage, replies "runResult"
 // Replies carry only structured-cloneable data (plain strings/objects).
 
-import { loadDmd, compile, run, warmRuntime, dmdLastModified } from "./glue.js";
+import { loadDmd, compile, run, warmRuntime, setStdin, dmdLastModified } from "./glue.js";
 
 self.onmessage = async (e) => {
     const msg = e.data;
@@ -55,6 +55,7 @@ self.onmessage = async (e) => {
     if (msg.type === "run") {
         let result;
         try {
+            setStdin(msg.stdin);
             result = run(msg.src, (phase) => self.postMessage({ type: "runPhase", phase }));
         } catch (err) {
             result = { output: "", errors: 1, diagnostics: "dmd.wasm worker error: " + String((err && err.message) || err) };

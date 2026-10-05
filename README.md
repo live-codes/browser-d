@@ -12,7 +12,8 @@ Status: working. Verified end-to-end in Chrome — see [Verified](#verified).
 node serve.mjs          # http://localhost:8000/
 ```
 
-Then open <http://localhost:8000/> and press **Run** (or Ctrl/Cmd+Enter).
+Then open <http://localhost:8000/> and press **Run** (or Ctrl/Cmd+Enter). The
+**Standard input** panel is fed to the program on fd 0.
 
 A static file server is required (ES-module Workers and WebAssembly are blocked
 over `file://`) but nothing is compiled server-side. `serve.mjs` exists mainly to
@@ -33,6 +34,8 @@ http://localhost:8000/?wasm=https://dkorpel.github.io/dmd-explorer/dmd.wasm
   `toString` all work.
 - **Diagnostics** come back with file/line/column and correct messages, so
   inline editor markers are feasible.
+- **stdin** works: `stdin.byLine()` reads text the page supplies, and re-running
+  or changing that text re-reads from the start rather than seeing a stale EOF.
 - A program that never terminates is **killable and recoverable**: the compiler
   runs in a Worker, which is terminated and replaced on a watchdog timeout, and
   the page is usable again afterwards.
@@ -46,13 +49,15 @@ Chrome, all runs against `vendor/dmd.wasm` served locally.
 | `writeln` + `foreach` | `hello from D…` / `0 1 4 9 16` | ~1–2 s |
 | `std.algorithm`: `sort`, `filter`, `sum`, `maxElement` | correct output | ~8 s |
 | Template struct + `opBinary` + `toString` | `a + b = (11.5, 22.5)` | ~8 s |
-| Type error | `input.d(6): Error: cannot implicitly convert…` | ~0.6–1.1 s |
+| `stdin.byLine()` over `1 2 35` | `numbers: 3  sum: 38` | ~8 s |
+| Type error | `input.d(6): Error: cannot implicitly convert…` | ~0.6–1.8 s |
 | `void main(){while(true){}}` | stopped at 60 s, compiler restarted, next run OK | — |
 
 Wall-clock from Run to output, on a loaded page (compiler fetched, druntime
-precompiled). Figures vary run to run and with machine load. The first program
-that pulls in Phobos pays a multi-second build; later ones reuse the warm
-snapshot, and re-running *unchanged* source skips the build entirely.
+precompiled). Figures vary a lot run to run and with machine load — Phobos-heavy
+builds were observed between ~7 s and ~18 s. The first program that pulls in
+Phobos pays the multi-second build; later ones reuse the warm snapshot, and
+re-running the *same* build is ~50 ms, whether or not the stdin text changed.
 
 ## How it works
 
@@ -72,15 +77,17 @@ build(src)                         compile snippet against the warm snapshot
   ↓  dmdwasm_wasm_ptr()/len()
 new WebAssembly.Module(bin)        the program, as a runnable wasm module
   ↓
+restore the warm snapshot          clears libc's stdio state (see below)
+  ↓
 new WebAssembly.Instance(module, { env: <dmd.wasm's own exports>,
                                    wasi_snapshot_preview1 })
   ↓  _start()
-stdout captured via the WASI fd_write shim
+stdout captured via the WASI fd_write shim; stdin served from the page's text
 ```
 
 Because the program imports its libc from the instance it was linked against,
 its `printf`/`malloc` are dmd.wasm's, and its pointers stay dereferenceable on
-both sides. Two details in `vendor/glue.js` are load-bearing and worth not
+both sides. Three details in `vendor/glue.js` are load-bearing and worth not
 "simplifying" away:
 
 - **A fresh instance per compile.** The frontend is a one-shot compiler: its
@@ -90,6 +97,10 @@ both sides. Two details in `vendor/glue.js` are load-bearing and worth not
 - **Snapshot/restore for the warm runtime.** Restoring the snapshot rewinds the
   frontend but not libc's heap top, so the warm instance is dropped and rebuilt
   once memory has grown past 512 MB.
+- **Snapshot restore before each run.** The self-linked program shares dmd.wasm's
+  `stdin`/`stdout`/`stderr` `FILE*` globals, so it also inherits libc's EOF flag;
+  without the restore the second Run of the same build reads no input. See
+  [vendor/README.md](vendor/README.md#why-exec-restores-the-snapshot).
 
 ### Worker protocol
 
@@ -100,7 +111,7 @@ both sides. Two details in `vendor/glue.js` are load-bearing and worth not
 | `{type: "load", url}` | `loaded` / `loadError` |
 | `{type: "warm"}` | `warmed` |
 | `{type: "compile", src, wat}` | `result` — lex/parse/sema/AST/IR/asm/WAT + diagnostics |
-| `{type: "run", src}` | `runPhase` stage, then `runResult` — `{output, errors, exitCode, diagnostics}` |
+| `{type: "run", src, stdin}` | `runPhase` stage, then `runResult` — `{output, errors, exitCode, diagnostics}` |
 
 The PoC only uses `load`/`warm`/`run`. `compile` is unused here but is what a
 diagnostics/lint pass would use, and it's the same call the upstream explorer
@@ -125,9 +136,10 @@ Things to resolve before this becomes a language, roughly in order of weight:
    `application/wasm` and cached by the browser, and can be lazily loaded only
    when a module actually uses D — the same treatment the other wasm languages
    get.
-4. **No filesystem, args, env or stdin.** The WASI shim stubs them (stdin
-   returns `EBADF`), so interactive `readln` is not available. Programs are
-   pure-compute plus stdout/stderr.
+4. **Stdin works; filesystem, args and env do not.** fd 0 is served from text the
+   page supplies ([local patch](vendor/README.md#local-patch)), so `readln` and
+   `stdin.byLine` work. There is no filesystem, argv or environment: a program is
+   stdin plus stdout/stderr.
 5. **No `import` of other local modules / multi-file projects** — a single
    source string is compiled. LiveCodes' multi-file support would need the
    frontend's VFS surface, which this build doesn't expose.

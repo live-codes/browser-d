@@ -5,3 +5,4 @@
 
 ## Workflow
 - Prefers to start with a minimal, self-contained proof-of-concept (e.g., a single simple HTML page that works) before wiring an approach into the full project. Confidence: 0.6
+- Values feature parity with existing implementations: when adding a capability, expects it to work the way comparable features already do elsewhere in the project (e.g. "fake stdin like we did in other wasm languages"). Prior art in the codebase beats a novel approach. Confidence: 0.6

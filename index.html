@@ -23,6 +23,8 @@
                   font: 13px/1.45 ui-monospace, Consolas, monospace; tab-size: 4;
                   white-space: pre; overflow: auto; color: inherit; }
   textarea { flex: 1; resize: none; outline: none; }
+  #src { flex: 3; }
+  #stdin { flex: 1; border-top: 1px solid var(--line); }
   #out { flex: 1; }
   #diag { flex: 0 1 auto; max-height: 45%; color: var(--err); border-top: 1px solid var(--line); }
   [hidden] { display: none !important; }
@@ -43,6 +45,9 @@
   <section>
     <h2>D source</h2>
     <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    <h2>Standard input</h2>
+    <textarea id="stdin" spellcheck="false" autocapitalize="off" autocomplete="off"
+              placeholder="fed to the program on stdin (fd 0)"></textarea>
   </section>
   <section>
     <h2>Output</h2>
@@ -91,6 +96,23 @@ void main()
     writeln("a = ", a, ", b = ", b, ", a + b = ", a + b);
 }
 `],
+  ["Reading stdin", `import std.stdio, std.conv;
+
+void main()
+{
+    long sum;
+    size_t count;
+    foreach (line; stdin.byLine())
+    {
+        sum += line.to!long;
+        ++count;
+    }
+    writeln("numbers: ", count, "  sum: ", sum);
+}
+`, `1
+2
+35
+`],
   ["Diagnostics: type mismatch", `import std.stdio;
 
 void main()
@@ -103,7 +125,8 @@ void main()
 ];
 
 const $ = (id) => document.getElementById(id);
-const srcEl = $("src"), outEl = $("out"), diagEl = $("diag"), statusEl = $("status"), runBtn = $("run");
+const srcEl = $("src"), stdinEl = $("stdin"), outEl = $("out"), diagEl = $("diag"),
+      statusEl = $("status"), runBtn = $("run");
 const examplesEl = $("examples");
 
 // Resolved against the page, not the worker: glue.js fetches this URL from
@@ -205,7 +228,7 @@ function run() {
     showDiagnostics("");
     startedAt = performance.now();
     setStatus("compiling…", true);
-    worker.postMessage({ type: "run", src: srcEl.value });
+    worker.postMessage({ type: "run", src: srcEl.value, stdin: stdinEl.value });
 
     clearTimeout(watchdog);
     watchdog = setTimeout(() => {
@@ -223,12 +246,17 @@ for (const [label, code] of EXAMPLES) {
     option.textContent = label;
     examplesEl.appendChild(option);
 }
+function loadExample(index) {
+    const [, code, stdin = ""] = EXAMPLES[index];
+    srcEl.value = code;
+    stdinEl.value = stdin;
+}
 examplesEl.addEventListener("change", () => {
-    srcEl.value = EXAMPLES[examplesEl.selectedIndex][1];
+    loadExample(examplesEl.selectedIndex);
     srcEl.focus();
 });
 examplesEl.selectedIndex = 0;
-srcEl.value = EXAMPLES[0][1];
+loadExample(0);
 
 runBtn.addEventListener("click", run);
 addEventListener("keydown", (e) => {

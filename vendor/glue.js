@@ -9,12 +9,25 @@ let memory = null;
 let stdoutText = "";   // fd 1: the -vasm disassembly
 let stderrText = "";   // fd 2: diagnostics
 
+// fd 0. Fed by the host page before each run; nothing is read from the real
+// process, so a program sees exactly the text the user supplied.
+// --- local patch, see vendor/README.md ---
+let stdinBytes = new Uint8Array(0);
+let stdinPos = 0;
+
 const td = new TextDecoder("utf-8");
 const te = new TextEncoder();
 
 function readCStr() {} // unused placeholder
 
 function dv() { return new DataView(memory.buffer); }
+
+// Hand the program's stdin to the WASI shim; call before run().
+// --- local patch, see vendor/README.md ---
+export function setStdin(text) {
+    stdinBytes = te.encode(text == null ? "" : String(text));
+    stdinPos = 0;
+}
 
 // Collect bytes written to fd 1/2 (stdout/stderr) from an iovec array.
 function writeIovs(fd, iovsPtr, iovsLen, nwrittenPtr) {
@@ -36,11 +49,41 @@ function writeIovs(fd, iovsPtr, iovsLen, nwrittenPtr) {
 
 const wasi = {
     fd_write: (fd, iovs, iovsLen, nwritten) => writeIovs(fd, iovs, iovsLen, nwritten),
-    fd_read: () => WASI_EBADF,
+    // fd 0 serves the host-supplied input; a zero-length read is EOF, which is
+    // what readln/ byLine are waiting for. Every other fd stays EBADF.
+    // --- local patch, see vendor/README.md ---
+    fd_read: (fd, iovsPtr, iovsLen, nreadPtr) => {
+        if (fd !== 0) return WASI_EBADF;
+        const view = dv();
+        let read = 0;
+        for (let i = 0; i < iovsLen; i++) {
+            const ptr = view.getUint32(iovsPtr + i * 8, true);
+            const len = view.getUint32(iovsPtr + i * 8 + 4, true);
+            const n = Math.min(len, stdinBytes.length - stdinPos);
+            if (n <= 0) break;
+            new Uint8Array(memory.buffer, ptr, n).set(stdinBytes.subarray(stdinPos, stdinPos + n));
+            stdinPos += n;
+            read += n;
+            if (stdinPos >= stdinBytes.length) break;
+        }
+        view.setUint32(nreadPtr, read, true);
+        return WASI_ESUCCESS;
+    },
     fd_pread: () => WASI_EBADF,
     fd_close: () => WASI_ESUCCESS,
     fd_seek: () => WASI_EBADF,
-    fd_fdstat_get: () => WASI_EBADF,
+    // libc probes the filetype to choose TTY vs buffered behaviour, so the three
+    // standard fds are reported as character devices rather than erroring.
+    // --- local patch, see vendor/README.md ---
+    fd_fdstat_get: (fd, statPtr) => {
+        if (fd > 2) return WASI_EBADF;
+        const view = dv();
+        view.setUint8(statPtr, 2);                                   // filetype: character_device
+        view.setUint16(statPtr + 2, 0, true);                        // fdflags
+        view.setBigUint64(statPtr + 8, 0xffffffffffffffffn, true);   // rights_base
+        view.setBigUint64(statPtr + 16, 0xffffffffffffffffn, true);  // rights_inheriting
+        return WASI_ESUCCESS;
+    },
     fd_filestat_get: () => WASI_EBADF,
     fd_filestat_set_size: () => WASI_EBADF,
     fd_prestat_get: () => WASI_EBADF,
@@ -346,6 +389,14 @@ function exec(ctx) {
     // the program's is the memory of the instance it was linked against.
     exports = ctx.exports;
     memory = ctx.memory;
+    // Rewind to the post-warm baseline before instantiating. The program's data
+    // segments repopulate its region, and — the point of this — libc's stdin FILE
+    // sheds the EOF flag the previous run left on it. The self-linked program
+    // shares dmd.wasm's own stdin/stdout/stderr FILE pointers, so without this a
+    // second run of the same build sees EOF immediately.
+    // --- local patch, see vendor/README.md ---
+    if (warmCtx && warmCtx.memory === memory)
+        restoreWarm();
     stdoutText = "";
     stderrText = "";
     let exitCode = 0;

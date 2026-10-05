@@ -1,8 +1,10 @@
 # Vendored D toolchain
 
-Upstream code, vendored **unmodified**. Do not edit these files in place —
-changes are lost on update, and `glue.js` encodes several non-obvious invariants
-(see "Load-bearing details" in the [project README](../README.md)).
+Upstream code, vendored with **one small local patch** (stdin support — see
+[Local patch](#local-patch)). `dmd.wasm` is byte-for-byte upstream. `glue.js` and
+`worker.js` carry the patch and must have it re-applied on update; `glue.js` also
+encodes several non-obvious invariants (see "Load-bearing details" in the
+[project README](../README.md)).
 
 ## Provenance
 
@@ -15,7 +17,11 @@ pinned to the deployed build rather than to a DMD release.
 
 Downloaded 2026-09-17 (`Last-Modified: Tue, 15 Sep 2026 18:57:49 GMT`).
 
-| File | Size | SHA-256 |
+Sizes and hashes are of the files **as downloaded**. `dmd.wasm` is still exactly
+this; `glue.js` and `worker.js` were subsequently patched (see
+[Local patch](#local-patch) for their current hashes).
+
+| File | Size | SHA-256 as downloaded |
 | --- | --- | --- |
 | `dmd.wasm` | 26,209,599 | `65039FCC95A116E2007A0F74279B29868A882676B105B26005840A74965EBC45` |
 | `glue.js` | 15,981 | `55900DA4E476730FE40CDAF91E29C29C87B8D68940F256BE0215130208891B49` |
@@ -32,6 +38,38 @@ curl -fO $base/worker.js
 
 Then re-check the worker protocol and the exported `dmdwasm_*` symbols against
 `index.html`, and re-run the checks in the project README.
+
+## Local patch
+
+Upstream never implements fd 0: `fd_read` returns `EBADF`, so `readln` and
+`stdin.byLine` cannot work at all. The patch adds host-fed stdin:
+
+- **`glue.js`** — a `setStdin(text)` export; real `fd_read` (serves fd 0 from
+  those bytes, with a zero-length read as EOF); `fd_fdstat_get` (reports fds 0-2
+  as character devices, which is what libc probes for TTY behaviour); and a
+  snapshot restore in `exec()` (see below).
+- **`worker.js`** — forwards `stdin` from the `run` message to `setStdin`.
+
+Everything else is untouched. Current on-disk (patched) hashes:
+
+| File | Size | SHA-256 |
+| --- | --- | --- |
+| `glue.js` | 18,499 | `913DF2A339C2F70BE6F8B503E45C007B0711688DB0024058F32EF75C1198DFE4` |
+| `worker.js` | 2,776 | `E270EF047DDA338DCE4FBACAF6257D016D3E02B90866B1820E43BCC9036CFDB6` |
+
+### Why `exec()` restores the snapshot
+
+The wasm backend binds the program's `stdin`/`stdout`/`stderr` symbols to
+dmd.wasm's *own* `FILE*` globals (`wasmSelfLinkDataSymbols` in
+`compiler/wasm/dmdwasm.d`). The built program therefore shares libc's stdio state,
+and a program that reads stdin to EOF leaves the EOF flag set on that FILE — so
+re-running the same build saw EOF immediately and produced different output
+(observed: `3 numbers, sum 38`, then `0, 0`).
+
+Restoring the post-warm snapshot before each instantiation clears it, and the
+program's own data segments repopulate its region. Repeat runs are then both
+correct and cheap — ~45 ms against a multi-second rebuild — which is also why
+changing stdin does not force a rebuild.
 
 ## License
 
