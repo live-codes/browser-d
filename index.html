@@ -131,10 +131,10 @@ const examplesEl = $("examples");
 
 // Resolved against the page, not the worker: glue.js fetches this URL from
 // inside vendor/worker.js, where a bare relative path would resolve against
-// /vendor/. The compiler asset lives with the package that ships it; dmd.wasm is
-// served as application/wasm with CORS: *, so ?wasm= can also point at a CDN.
+// /vendor/. The compiler asset lives with the package that ships it, gzipped
+// (glue.js inflates it); ?wasm= can also point at a CDN copy.
 const wasmUrl = new URL(
-    new URLSearchParams(location.search).get("wasm") || "./packages/dlang-wasm/assets/dmd.wasm",
+    new URLSearchParams(location.search).get("wasm") || "./packages/dlang-wasm/assets/dmd.wasm.gz",
     location.href,
 ).href;
 // A user program can loop forever; the worker is the only thread we can kill, so

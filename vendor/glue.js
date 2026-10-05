@@ -157,7 +157,20 @@ export async function loadDmd(url = "dmd.wasm") {
     if (lm) { const d = new Date(lm); if (!isNaN(d)) lastModified = d; }
     // Compile once; instantiate per compile (see newInstance). Holding only the
     // Module — not an Instance — means no linear memory is retained between compiles.
-    wasmModule = await WebAssembly.compileStreaming(resp);
+    // --- local patch, see vendor/README.md ---
+    // The asset ships gzipped (25 MB of wasm is over the CDNs' per-file limits). Decide by the
+    // bytes rather than the file name: a server sending `Content-Encoding: gzip` has already
+    // inflated it by the time fetch() hands it over, and inflating that again would fail.
+    const bytes = new Uint8Array(await resp.arrayBuffer());
+    wasmModule = isGzip(bytes) ? await WebAssembly.compile(await gunzip(bytes))
+                               : await WebAssembly.compile(bytes);
+}
+
+function isGzip(bytes) { return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b; }
+
+async function gunzip(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 // Spin up a fresh wasm instance with its own zero-initialized linear memory.

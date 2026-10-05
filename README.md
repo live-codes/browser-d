@@ -42,7 +42,7 @@ http://localhost:8000/?wasm=https://dkorpel.github.io/dmd-explorer/dmd.wasm
 
 ## Verified
 
-Chrome, all runs against `vendor/dmd.wasm` served locally.
+Chrome, all runs against `packages/dlang-wasm/assets/dmd.wasm.gz` served locally.
 
 | Program | Result | Time |
 | --- | --- | --- |
@@ -61,9 +61,9 @@ re-running the *same* build is ~50 ms, whether or not the stdin text changed.
 
 ## How it works
 
-The compiler is a WebAssembly build of DMD (`dmd.wasm`, 25 MB) built against
-wasi-libc. It is driven from a Worker, which keeps the synchronous compile off
-the main thread.
+The compiler is a WebAssembly build of DMD (`dmd.wasm`, 25 MB — shipped gzipped as 5.5 MB) built
+against wasi-libc. It is driven from a Worker, which keeps the synchronous compile off the main
+thread.
 
 The interesting part is that `dmd.wasm` **self-links** (`-mwasm-selflink`): it
 compiles the snippet plus every druntime/Phobos module it imports into a complete
@@ -132,10 +132,9 @@ Things to resolve before this becomes a language, roughly in order of weight:
    <https://dkorpel.github.io/dmd-explorer/>. Rebuilding it ourselves is a
    toolchain project (host LDC + LLVM `wasm-ld` + Binaryen), not a script.
    Worth asking upstream whether this is intended to land.
-3. **25 MB download.** Payload size matters for a playground. It is
-   `application/wasm` and cached by the browser, and can be lazily loaded only
-   when a module actually uses D — the same treatment the other wasm languages
-   get.
+3. **Payload size.** 5.5 MB gzipped, 25 MB inflated — cached by the browser, and
+   best lazily loaded only when a module actually uses D, the same treatment the
+   other wasm languages get.
 4. **Stdin works; filesystem, args and env do not.** fd 0 is served from text the
    page supplies ([local patch](vendor/README.md#local-patch)), so `readln` and
    `stdin.byLine` work. There is no filesystem, argv or environment: a program is
@@ -161,7 +160,7 @@ vendor/             upstream runtime, vendored, with one documented patch (stdin
   README.md         provenance, the local patch, license and how to update
 packages/
   dlang-wasm/       the distributable package (@live-codes/dlang-wasm)
-    assets/dmd.wasm the DMD wasm build (25 MB)
+    assets/dmd.wasm.gz  the DMD wasm build, gzipped (5.5 MB; 25 MB inflated)
     src/            runtime, API, asset loading
     example/        browser check: module worker + classic worker
     bin/            dlang-wasm-copy-assets
@@ -170,7 +169,7 @@ packages/
 
 `vendor/` is upstream code carrying the stdin patch described in
 [vendor/README.md](vendor/README.md). The compiler asset lives with the package that ships it —
-the page's default wasm URL points at `packages/dlang-wasm/assets/dmd.wasm`.
+the page's default wasm URL points at `packages/dlang-wasm/assets/dmd.wasm.gz`.
 
 [`packages/dlang-wasm`](packages/dlang-wasm) is the same runtime productised for use in LiveCodes,
 in the shape of [`@live-codes/clang-wasm`](https://github.com/live-codes/clang-wasm): an API, an IIFE

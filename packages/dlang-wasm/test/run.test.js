@@ -58,6 +58,22 @@ void main()
 	assert.equal(result.stdout, '[1, 3, 5, 9]\n');
 });
 
+test('supports floats and std.math', async () => {
+	const result = await compiler.run(`import std.stdio, std.math;
+
+void main()
+{
+    writeln(sqrt(2.0));
+    writeln(sin(0.0), " ", pow(2.0, 10.0));
+    real x = 1.5L;
+    writeln(x, " ", real.mant_dig);
+}
+`);
+	assert.deepEqual(result.errors, []);
+	// `real` is double on wasm, so mant_dig is 53 rather than x87's 64.
+	assert.equal(result.stdout, '1.41421\n0 1024\n1.5 53\n');
+});
+
 test('feeds stdin to the program', async () => {
 	const result = await compiler.run(SUM_SOURCE, '1\n2\n35\n');
 	assert.deepEqual(result.errors, []);

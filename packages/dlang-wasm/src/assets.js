@@ -3,6 +3,11 @@
 // Two sources, matching the two entry points: `packaged` (Node can read the files that ship in this
 // package straight off disk) and `baseUrl` (anything else fetches them). Modules are cached per
 // source, so two compilers asking for the same assets compile the wasm once.
+//
+// The asset ships gzipped - 5.7 MB against 25 MB - and is inflated here, so what a host publishes and
+// what a browser downloads are both the small one.
+
+const WASM_ASSET = 'dmd.wasm.gz';
 
 const MODULES = new Map();
 
@@ -35,7 +40,7 @@ export function resolveAssetSource(options = {}, packaged = null) {
 		);
 	}
 	const base = resolveBaseUrl(options.baseUrl);
-	const url = new URL('dmd.wasm', base).href;
+	const url = new URL(WASM_ASSET, base).href;
 	return { kind: 'url', url, key: url };
 }
 
@@ -55,8 +60,9 @@ async function compile(source, onProgress) {
 		source.kind === 'packaged'
 			? await readPackaged(source, onProgress)
 			: await readRemote(source, onProgress);
+	const wasm = isGzip(bytes) ? await inflate(bytes, source) : bytes;
 	try {
-		return await WebAssembly.compile(bytes);
+		return await WebAssembly.compile(wasm);
 	} catch (cause) {
 		throw new Error(
 			`Failed to compile the runtime wasm from ${source.url ?? source.wasmPath}: ` +
@@ -64,6 +70,23 @@ async function compile(source, onProgress) {
 			{ cause }
 		);
 	}
+}
+
+// Decide by the bytes, not the file name. A server that sends `Content-Encoding: gzip` has already
+// inflated the asset by the time fetch() hands it over, and inflating that again would fail.
+function isGzip(bytes) {
+	return bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+}
+
+async function inflate(bytes, source) {
+	if (typeof DecompressionStream !== 'function') {
+		throw new Error(
+			`${source.url ?? source.wasmPath} is gzipped and this environment has no DecompressionStream ` +
+				'to inflate it. Serve the asset with `Content-Encoding: gzip`, or decompress it yourself.'
+		);
+	}
+	const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+	return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
 async function readPackaged(source, onProgress) {

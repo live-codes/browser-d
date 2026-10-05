@@ -93,7 +93,7 @@ async function runInWorker(label, url, options) {
 	}
 }
 
-log('Loading 25 MB of dmd.wasm per worker…', 'info');
+log('Loading the gzipped compiler (5.5 MB) per worker…', 'info');
 
 // 1. A module worker importing the ES module entry.
 await runInWorker('ES module entry in a module worker', './worker.module.js', { type: 'module' });

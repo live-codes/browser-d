@@ -4,7 +4,7 @@
 
 | Component | Where | Licence |
 | --- | --- | --- |
-| `assets/dmd.wasm` | DMD, druntime and Phobos compiled to WebAssembly | [BSL-1.0](https://github.com/dlang/dmd/blob/master/LICENSE.txt) |
+| `assets/dmd.wasm.gz` | DMD, druntime and Phobos compiled to WebAssembly (gzipped at rest; the loader inflates it) | [BSL-1.0](https://github.com/dlang/dmd/blob/master/LICENSE.txt) |
 | `src/`, `bin/`, `scripts/`, `example/` | written for this package | MIT (see [LICENSE](LICENSE)) |
 
 There are **no npm dependencies**. The WASI shim in `src/runtime.js` is this package's own, so nothing

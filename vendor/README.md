@@ -17,9 +17,10 @@ pinned to the deployed build rather than to a DMD release.
 
 Downloaded 2026-09-17 (`Last-Modified: Tue, 15 Sep 2026 18:57:49 GMT`).
 
-Sizes and hashes are of the files **as downloaded**. `dmd.wasm` is still exactly
-this; `glue.js` and `worker.js` were subsequently patched (see
-[Local patch](#local-patch) for their current hashes).
+Sizes and hashes are of the files **as downloaded**. `dmd.wasm` is unchanged apart from now being
+stored gzipped as `packages/dlang-wasm/assets/dmd.wasm.gz` — `src/asset-receipts.js` records both the
+gzipped and the unpacked hash, and the latter is this file's. `glue.js` and `worker.js` were
+subsequently patched (see [Local patch](#local-patch) for their current hashes).
 
 | File | Size | SHA-256 as downloaded |
 | --- | --- | --- |
@@ -27,8 +28,8 @@ this; `glue.js` and `worker.js` were subsequently patched (see
 | `glue.js` | 15,981 | `55900DA4E476730FE40CDAF91E29C29C87B8D68940F256BE0215130208891B49` |
 | `worker.js` | 2,732 | `3E918E00CE273DE3F1543AC23FA2EBB67BB034B58D389696AD2559E351606CE4` |
 
-`dmd.wasm` now lives at `packages/dlang-wasm/assets/dmd.wasm`, with the package that ships it; this
-directory keeps only the two JS files the demo page drives.
+The compiler now lives at `packages/dlang-wasm/assets/dmd.wasm.gz`, gzipped, with the package that
+ships it; this directory keeps only the two JS files the demo page drives.
 
 ## Update
 
@@ -52,12 +53,14 @@ Upstream never implements fd 0: `fd_read` returns `EBADF`, so `readln` and
   as character devices, which is what libc probes for TTY behaviour); and a
   snapshot restore in `exec()` (see below).
 - **`worker.js`** — forwards `stdin` from the `run` message to `setStdin`.
+- **`glue.js`** — `loadDmd()` inflates the gzipped asset, deciding by the gzip magic rather than the
+  file name so a server sending `Content-Encoding: gzip` cannot cause a double-decompress.
 
 Everything else is untouched. Current on-disk (patched) hashes:
 
 | File | Size | SHA-256 |
 | --- | --- | --- |
-| `glue.js` | 18,499 | `913DF2A339C2F70BE6F8B503E45C007B0711688DB0024058F32EF75C1198DFE4` |
+| `glue.js` | 19,267 | `732566B8B76D31F7F7BC6873E540945157172B2D9A281D2FC3986E9E4881EEC6` |
 | `worker.js` | 2,776 | `E270EF047DDA338DCE4FBACAF6257D016D3E02B90866B1820E43BCC9036CFDB6` |
 
 ### Why `exec()` restores the snapshot

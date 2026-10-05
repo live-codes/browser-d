@@ -6,7 +6,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-const WASM = new URL('../assets/dmd.wasm', import.meta.url);
+const WASM = new URL('../assets/dmd.wasm.gz', import.meta.url);
 
 export const packagedAssets = {
 	directory: fileURLToPath(new URL('../assets/', import.meta.url)),

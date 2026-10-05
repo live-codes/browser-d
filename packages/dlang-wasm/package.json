@@ -4,6 +4,16 @@
   "description": "Run D with one API, on the DMD compiler compiled to WebAssembly",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/live-codes/browser-d.git",
+    "directory": "packages/dlang-wasm"
+  },
+  "homepage": "https://github.com/live-codes/browser-d/tree/main/packages/dlang-wasm#readme",
+  "bugs": "https://github.com/live-codes/browser-d/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "node": "./src/index.node.js",
@@ -24,11 +34,13 @@
     "THIRD-PARTY-NOTICES.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build:iife": "node scripts/build-iife.mjs",
-    "test": "node --experimental-wasm-exnref --test \"test/*.test.js\""
+    "test": "node --experimental-wasm-exnref --test \"test/*.test.js\"",
+    "prepack": "npm run build:iife",
+    "prepublishOnly": "npm test"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"
